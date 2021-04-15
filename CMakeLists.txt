@@ -1,3 +1,4 @@
+project(PPDB DESCRIPTION "PPDB Reader" LANGUAGES CXX)
 cmake_minimum_required (VERSION 3.0)
 
 set (INC ${CMAKE_CURRENT_SOURCE_DIR}/inc)
