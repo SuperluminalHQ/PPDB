@@ -250,7 +250,7 @@ std::string BlobHeapReader::GetAsDocumentBlob(size_t offset) const
 
         size_t nextOffset = DecompressU32(&iter, std::end(docBlob) - iter);
         if (nextOffset == 0)
-            break;
+            continue;
 
         auto part = Get(nextOffset);
         if (part.empty())
