@@ -621,10 +621,14 @@ namespace PPDB
     {
     public: // static
         static std::shared_ptr<PortablePdbReader> CreateReader(std::vector<uint8_t> data);
+        static std::shared_ptr<PortablePdbReader> CreateReader(plat::data_view<uint8_t> data_view);
         static std::shared_ptr<PortablePdbReader> CreateReader(const char *file);
 
     private:
         PortablePdbReader(std::vector<uint8_t> data);
+        PortablePdbReader(plat::data_view<uint8_t> data_view);
+
+        void Initialize();
 
     public:
         std::string Version() const;

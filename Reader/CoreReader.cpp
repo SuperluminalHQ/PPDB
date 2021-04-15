@@ -61,6 +61,15 @@ std::shared_ptr<PortablePdbReader> PortablePdbReader::CreateReader(std::vector<u
     return std::move(reader);
 }
 
+std::shared_ptr<PortablePdbReader> PortablePdbReader::CreateReader(plat::data_view<uint8_t> data_view)
+{
+	auto reader = std::shared_ptr<PortablePdbReader>{ new PortablePdbReader{ std::move(data_view) } };
+
+	// Create a weak pointer to the reader itself
+	reader->_this = reader;
+	return std::move(reader);
+}
+
 std::shared_ptr<PortablePdbReader> PortablePdbReader::CreateReader(const char *file)
 {
     std::basic_ifstream<uint8_t> pdbFile{ file, std::ios_base::in | std::ios_base::binary };
@@ -130,53 +139,65 @@ namespace
     }
 }
 
-PortablePdbReader::PortablePdbReader(std::vector<uint8_t> data)
+PortablePdbReader::PortablePdbReader(plat::data_view<uint8_t> data_view)
+	: _data_view{ data_view }
+	, _version{ "" }
+{
+    Initialize();
+}
+
+PortablePdbReader::PortablePdbReader(std::vector<uint8_t> data) 
     : _data{ std::move(data) }
     , _version{ "" }
 {
     _data_view = plat::data_view<uint8_t>{ _data.size(), _data.data() };
-    auto header = reinterpret_cast<const PortablePdbMin *>(std::begin(_data_view));
+    Initialize();
+}
 
-    // Check min size and magic number: 'BJSB'
-    if (_data_view.size() < sizeof(*header)
-        || header->Magic != 0x424A5342)
-    {
-        throw Exception{ ErrorCode::CorruptFormat };
-    }
+void PortablePdbReader::Initialize()
+{
+	auto header = reinterpret_cast<const PortablePdbMin*>(std::begin(_data_view));
 
-    // Store the version string offset - consumer may want it.
-    // Specification indicates it is UTF-8 and null terminated,
-    // so we can treat it as a C-string for now.
-    auto versionOffset = std::begin(_data_view) + sizeof(*header);
-    _version = reinterpret_cast<const char *>(versionOffset);
+	// Check min size and magic number: 'BJSB'
+	if (_data_view.size() < sizeof(*header)
+		|| header->Magic != 0x424A5342)
+	{
+		throw Exception{ ErrorCode::CorruptFormat };
+	}
 
-    // Move passed the version string and flags
-    const uint8_t *streams = versionOffset + header->Length + sizeof(uint16_t);
-    if (streams >= std::end(_data_view))
-        throw Exception{ ErrorCode::CorruptFormat };
+	// Store the version string offset - consumer may want it.
+	// Specification indicates it is UTF-8 and null terminated,
+	// so we can treat it as a C-string for now.
+	auto versionOffset = std::begin(_data_view) + sizeof(*header);
+	_version = reinterpret_cast<const char*>(versionOffset);
 
-    // Determine how many streams exist
-    auto streamCount = *reinterpret_cast<const uint16_t*>(streams);
-    streams += sizeof(streamCount);
-    if (streams >= std::end(_data_view))
-        throw Exception{ ErrorCode::CorruptFormat };
+	// Move passed the version string and flags
+	const uint8_t* streams = versionOffset + header->Length + sizeof(uint16_t);
+	if (streams >= std::end(_data_view))
+		throw Exception{ ErrorCode::CorruptFormat };
 
-    // Process streams
-    for (int i = 0; i < streamCount; ++i)
-    {
-        size_t remain = std::end(_data_view) - streams;
-        StreamResult result = ReadStreamHeader({ remain, streams });
-        const uint32_t extent = result.Header.Offset + result.Header.Size;
+	// Determine how many streams exist
+	auto streamCount = *reinterpret_cast<const uint16_t*>(streams);
+	streams += sizeof(streamCount);
+	if (streams >= std::end(_data_view))
+		throw Exception{ ErrorCode::CorruptFormat };
 
-        // Validate the returned stream extent
-        if (_data_view.size() < extent)
-            throw Exception{ ErrorCode::InvalidStreamExtent, result.Name };
+	// Process streams
+	for (int i = 0; i < streamCount; ++i)
+	{
+		size_t remain = std::end(_data_view) - streams;
+		StreamResult result = ReadStreamHeader({ remain, streams });
+		const uint32_t extent = result.Header.Offset + result.Header.Size;
 
-        assert(_entries.find(result.Name) == std::end(_entries));
-        _entries[std::move(result.Name)] = RelativeLocation{ result.Header.Size, result.Header.Offset };
+		// Validate the returned stream extent
+		if (_data_view.size() < extent)
+			throw Exception{ ErrorCode::InvalidStreamExtent, result.Name };
 
-        streams = result.NewPos;
-    }
+		assert(_entries.find(result.Name) == std::end(_entries));
+		_entries[std::move(result.Name)] = RelativeLocation{ result.Header.Size, result.Header.Offset };
+
+		streams = result.NewPos;
+	}
 }
 
 std::string PortablePdbReader::Version() const
